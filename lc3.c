@@ -12,25 +12,6 @@ typedef enum {
 	RUNNING,
 } emulator_state_t;
 
-// typedef enum {
-// 	BR = 0,
-// 	ADD,
-// 	LD,
-// 	ST,
-// 	JSR, 
-// 	AND, 
-// 	LDR, 
-// 	STR, 
-// 	RTI, 
-// 	NOT, 
-// 	LDI, 
-// 	STI, 
-// 	JMP, 
-// 	RES, 
-// 	LEA, 
-// 	TRAP,
-// } instruction_name_t;
-
 enum
 {
     BR = 0, /* branch */
@@ -51,59 +32,129 @@ enum
     TRAP    /* execute trap */
 };
 
-// LC-3 Instruction type
-typedef struct {
-	uint16_t opcode;		
-	// uint16_t BR = 0;		// Break
-	// uint16_t ADD = 1;		// Add
-	// uint16_t LD = 2; 		// Load
-	// uint16_t ST = 3;		// Store
-	// uint16_t JSR = 4;		// Jump register
-	// uint16_t AND = 5;		// Bitwise and
-	// uint16_t LDR = 6;		// Load register
-	// uint16_t STR = 7;		// Store register
-	// uint16_t RTI = 8;		// Unused
-	// uint16_t NOT = 9;		// Bitwise not
-	// uint16_t LDI = 10;		// Load indirect
-	// uint16_t STI = 11;		// Store indirect
-	// uint16_t JMP = 12;		// Jump
-	// uint16_t RES = 13;		// Reserved (unused)
-	// uint16_t LEA = 14;		// Load effective address
-	// uint16_t TRAP = 15;	// Execute trap
-} instruction_t;
-
 // LC-3 Machine object
 typedef struct {
 	emulator_state_t state;
+	const char *rom_name;
 	uint16_t ram[MEMORY_CAP];	// Memory with 65536 locations (128KB)
 	uint16_t R[REG_COUNT];		// Data registers R0-R7
 	uint16_t PC;				// Program counter
-	instruction_t inst;			// Currently executing instruction
+	uint16_t opcode;
 } lc3_t;
 
 
-bool init_lc3(lc3_t *lc3) {
+bool init_lc3(lc3_t *lc3, const char *rom_name) {
 	const uint16_t entry_point = 0x3000;
 
+	FILE *rom = fopen(rom_name, "rb");
+	if (!rom) {
+		fprintf(stderr, "Unknown/invalid file: %s.\n", rom_name);
+		return false;
+	}
+
+
 	// Check size of input file 
-	// TODO
-	// =====================
+	fseek(rom, 0, SEEK_END);
+	const size_t rom_size = ftell(rom);
+	const size_t max_size = sizeof lc3->ram - entry_point;
+	rewind(rom);
+
+	if (rom_size > max_size) {
+		fprintf(stderr, "Rom file %s is too big. Rom file size: %lu. Max size allowed: %lu.\n",
+				rom_name, (unsigned long)rom_size, (unsigned long)max_size);
+		return false;
+	}
+
+	if (fread(&lc3->ram[entry_point], rom_size, 1, rom) != 1) {
+		fprintf(stderr, "Could not read Rom file %s into LC-3 memory.\n", rom_name);
+		return false;
+	}
+
+	fclose(rom);
 
 	lc3->state = RUNNING;
 	lc3->PC = entry_point;
+	lc3->rom_name = rom_name;
 
 	return true;
 }
+
+void handle_input(lc3_t *lc3) {
+	(void)lc3;
+	return;
+}
+
+
+#ifdef DEBUG
+// Function to print debug info during execution of instructions
+void print_debug_info(lc3_t *lc3) {
+	printf("Address: 0x%04X, Opcode: 0x%04X Desc: ", lc3->PC - 1, lc3->opcode);
+	switch(lc3->opcode >> 12) {
+	case ADD:
+		printf("Execute ADD instruction\n");
+		break;
+	case AND:
+		printf("Execute AND instruction\n");
+		break;
+	case NOT:
+		printf("Execute NOT instruction\n");
+		break;
+	case BR:
+		printf("Execute BR instruction\n");
+		break;
+	case JMP:
+		printf("Execute JPM instruction\n");
+		break;
+	case JSR:
+		printf("Execute JSR instruction\n");
+		break;
+	case LD:
+		printf("Execute LD instruction\n");
+		break;
+	case LDI:
+		printf("Execute LDI instruction\n");
+		break;
+	case LDR:
+		printf("Execute LDR instruction\n");
+		break;
+	case LEA:
+		printf("Execute LEA instruction\n");
+		break;
+	case ST:
+		printf("Execute ST instruction\n");
+		break;
+	case STI:
+		printf("Execute STI instruction\n");
+		break;
+	case STR:
+		printf("Execute STR instruction\n");
+		break;
+	case TRAP:
+		printf("Execute TRAP instruction\n");
+		break;
+	case RES:
+	case RTI:
+	default:
+		printf("Invalid/unsuported opcode\n");
+		break;
+	}
+}
+
+#endif
 
 
 void emulate_instruction(lc3_t *lc3) {
 	// Get next opcode from RAM
 	// First fout bits are the instruction to execute 
 	// 		rest are parameters
-	lc3->inst.opcode = lc3->ram[lc3->PC];
+	lc3->opcode = lc3->ram[lc3->PC];
 	lc3->PC++;
 
-	switch(lc3->inst.opcode >> 12) {
+#ifdef DEBUG
+	print_debug_info(lc3);
+#endif
+
+	switch(lc3->opcode >> 12) {
 	case ADD:
 		// TODO
 		break;
@@ -155,16 +206,25 @@ void emulate_instruction(lc3_t *lc3) {
 
 }
 
-int main(void) {
-
+int main(int argc, char *argv[]) {
+	// Default usage message
+	if (argc < 2) {
+		fprintf(stderr, "Usage %s <rom_file>\n", argv[0]);
+		exit(EXIT_FAILURE);
+	}
 
 	// Initialize LC-3 Machine
 	lc3_t lc3 = {0};
-	if(!init_lc3(&lc3)) exit(EXIT_FAILURE);
-
+	const char *rom_name = argv[1];
+	if(!init_lc3(&lc3, rom_name)) exit(EXIT_FAILURE);
 
 	while (lc3.state != QUIT) {
+		// Handle user input
+		handle_input(&lc3);
+
+		// Emulate LC-3 Instructions
 		emulate_instruction(&lc3);
+
 	}
 
 	exit(EXIT_SUCCESS);

@@ -3,3 +3,6 @@ CFLAGS=-std=c17 -Wall -Wextra -Werror
 
 all:
 	$(CC) lc3.c -o lc3 $(CFLAGS)
+
+debug:
+	$(CC) lc3.c -o lc3 $(CFLAGS) -DDEBUG
