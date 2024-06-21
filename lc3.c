@@ -37,7 +37,8 @@ typedef struct {
 	uint16_t imm5;			// A 5-bit immediate value
 	uint16_t SR, SR1, SR2;	// Source register. one of R0..R7
 	uint16_t PCoffset9;		// A 9-bit value. Used with PC+offset addressing mode
-	uint16_t PCoffset11;	// 11-bit value. used with the JSR opcode to compute the target address of a subroutine call
+	uint16_t PCoffset11;	// 11-bit value. Used with the JSR opcode to compute the target address of a subroutine call
+	uint16_t offset6;		// 6-bit value. Used with the Base+offset addressing mode
 	uint16_t baseR;			// Base Register. Used with 6-bit offset to compute Base+offset addresses.
 } parameters_t;
 
@@ -272,30 +273,58 @@ void emulate_instruction(lc3_t *lc3) {
 		lc3->param.DR = (lc3->inst >> 9) & 0x7;
 		lc3->param.PCoffset9 = lc3->inst & 0x1FF;
 
-		lc3->R[lc3->param.DR] = lc3->ram[lc3->PC + sign_extend(lc3->param.PCoffset9, 9)];
+		lc3->R[lc3->param.DR] = lc3->ram[lc3->R[lc3->PC] + sign_extend(lc3->param.PCoffset9, 9)];
 		setcc(lc3);
 
 		break;
 	case LDI:
-		// TODO
+		// An address is computed by sign-extending bits [8:0] to 16 bits and adding this
+		// 		value to the incremented PC. What is stored in memory at this address is the
+		// 		address of the data to be loaded into DR
+		lc3->param.DR = (lc3->inst >> 9) & 0x7;
+		lc3->param.PCoffset9 = lc3->inst & 0x1FF;
+
+		lc3->R[lc3->param.DR] = lc3->ram[lc3->ram[lc3->R[lc3->PC] + sign_extend(lc3->param.PCoffset9, 9)]];
+		setcc(lc3);
 		break;
 	case LDR:
-		// TODO
-		break;
+		// The contents of memory at BaseR + SEXT(offset6) are loaded into DR
+		lc3->param.DR = (lc3->inst >> 9) & 0x7;
+		lc3->param.baseR = (lc3->inst >> 6) & 0x7;
+		lc3->param.offset6 = lc3->inst & 0x3F;
+
+		lc3->R[lc3->param.DR] = lc3->ram[lc3->R[lc3->param.baseR] + sign_extend(lc3->param.offset6, 6)];
+		setcc(lc3);
+ 		break;
 	case LEA:
-		// TODO
+		// An address is computed by sign-extending bits [8:0] to 16 bits and adding this
+		// 		value to the incremented PC. This address is loaded into DR.
+		lc3->param.DR = (lc3->inst >> 9) & 0x7;
+		lc3->param.PCoffset9 = lc3->inst & 0x1FF;
+		lc3->R[lc3->param.DR] = lc3->R[lc3->PC] + sign_extend(lc3->param.PCoffset9, 9);
+		setcc(lc3);
 		break;
 	case ST:
-		// TODO
+		// Comment
+		lc3->param.PCoffset9 = lc3->inst & 0x1FF;
+		lc3->param.SR = (lc3->inst >> 9) & 0x7;
+		lc3->ram[lc3->R[lc3->PC] + sign_extend(lc3->param.PCoffset9, 9)] = lc3->param.SR;
 		break;
 	case STI:
-		// TODO
+		// Comment
+		lc3->param.PCoffset9 = lc3->inst & 0x1FF;
+		lc3->param.SR = (lc3->inst >> 9) & 0x7;
+		lc3->ram[lc3->ram[lc3->R[lc3->PC] + sign_extend(lc3->param.PCoffset9, 9)]] = lc3->param.SR;
 		break;
 	case STR:
-		// TODO
+		// Comment
+		lc3->param.offset6 = lc3->inst & 0x3F;
+		lc3->param.baseR = (lc3->inst >> 6) & 0x7;
+		lc3->param.SR = (lc3->inst >> 9) & 0x7;
+		lc3->ram[lc3->R[lc3->param.baseR] + sign_extend(lc3->param.offset6, 6)] = lc3->param.SR;
 		break;
 	case TRAP:
-		// TODO
+		// Todo
 		break;
 	case RES:
 	case RTI:
