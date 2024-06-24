@@ -2,6 +2,10 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <signal.h>
+// Windows
+#include <Windows.h>
+#include <conio.h>  // _kbhit
 
 #define MEMORY_CAP 0xFFFF		// LC-3 Memory capacity
 #define REG_COUNT 8				// Number of registers R0-R7
@@ -12,6 +16,7 @@ typedef enum {
 	RUNNING,
 } emulator_state_t;
 
+// Opcodes
 enum
 {
     BR = 0, /* branch */
@@ -30,6 +35,16 @@ enum
     RES,    /* reserved (unused) */
     LEA,    /* load effective address */
     TRAP    /* execute trap */
+};
+
+// Trap Service Routines
+enum {
+	TRAP_GETC = 0x20,
+	TRAP_OUT = 0x21,
+	TRAP_PUTS = 0x22,
+	TRAP_IN = 0x23,
+	TRAP_PUTSP = 0x24,
+	TRAP_HALT = 0x25
 };
 
 typedef struct {
@@ -54,6 +69,7 @@ typedef struct {
 	parameters_t param;			// Parameters inside instruction
 	uint16_t opcode;			// Opcode
 } lc3_t;
+
 
 
 bool init_lc3(lc3_t *lc3, const char *rom_name) {
@@ -174,7 +190,7 @@ void print_debug_info(lc3_t *lc3) {
 	case RES:
 	case RTI:
 	default:
-		printf("Invalid/unsuported opcode\n");
+		printf("Invalid/unsuported opcode (DEBUG)\n");
 		break;
 	}
 }
@@ -286,6 +302,7 @@ void emulate_instruction(lc3_t *lc3) {
 
 		lc3->R[lc3->param.DR] = lc3->ram[lc3->ram[lc3->R[lc3->PC] + sign_extend(lc3->param.PCoffset9, 9)]];
 		setcc(lc3);
+		
 		break;
 	case LDR:
 		// The contents of memory at BaseR + SEXT(offset6) are loaded into DR
@@ -295,6 +312,7 @@ void emulate_instruction(lc3_t *lc3) {
 
 		lc3->R[lc3->param.DR] = lc3->ram[lc3->R[lc3->param.baseR] + sign_extend(lc3->param.offset6, 6)];
 		setcc(lc3);
+ 		
  		break;
 	case LEA:
 		// An address is computed by sign-extending bits [8:0] to 16 bits and adding this
@@ -303,38 +321,140 @@ void emulate_instruction(lc3_t *lc3) {
 		lc3->param.PCoffset9 = lc3->inst & 0x1FF;
 		lc3->R[lc3->param.DR] = lc3->R[lc3->PC] + sign_extend(lc3->param.PCoffset9, 9);
 		setcc(lc3);
+		
 		break;
 	case ST:
-		// Comment
+		// The contents of the register specified by SR are stored in the memory location
+		// 		whose address is computed by sign-extending bits [8:0] to 16 bits and adding this
+		// 		value to the incremented PC.
 		lc3->param.PCoffset9 = lc3->inst & 0x1FF;
 		lc3->param.SR = (lc3->inst >> 9) & 0x7;
 		lc3->ram[lc3->R[lc3->PC] + sign_extend(lc3->param.PCoffset9, 9)] = lc3->param.SR;
+		
 		break;
 	case STI:
-		// Comment
+		// The contents of the register specified by SR are stored in the memory location
+		// 		whose address is obtained as follows: Bits [8:0] are sign-extended to 16 bits and
+		// 		added to the incremented PC. 
 		lc3->param.PCoffset9 = lc3->inst & 0x1FF;
 		lc3->param.SR = (lc3->inst >> 9) & 0x7;
 		lc3->ram[lc3->ram[lc3->R[lc3->PC] + sign_extend(lc3->param.PCoffset9, 9)]] = lc3->param.SR;
+		
 		break;
 	case STR:
-		// Comment
+		// The contents of the register specified by SR are stored in the memory location
+		// 		whose address is computed by sign-extending bits [5:0] to 16 bits and adding this
+		// 		value to the contents of the register specified by bits [8:6].
 		lc3->param.offset6 = lc3->inst & 0x3F;
 		lc3->param.baseR = (lc3->inst >> 6) & 0x7;
 		lc3->param.SR = (lc3->inst >> 9) & 0x7;
 		lc3->ram[lc3->R[lc3->param.baseR] + sign_extend(lc3->param.offset6, 6)] = lc3->param.SR;
+		
 		break;
 	case TRAP:
-		// Todo
+		// First R7 is loaded with the incremented PC. Then the PC is loaded with the starting 
+		//		address of the system call specified by trapvector8. The starting address
+		//		is contained in the memory location whose address is obtained by zero-extending
+		//		trapvector8 to 16 bits.
+		lc3->R[7] = lc3->PC;
+
+		switch (lc3->inst & 0xFF) {
+		case TRAP_GETC:
+			lc3->R[0] = (uint16_t)getchar();
+			lc3->param.DR = 0;
+			setcc(lc3);
+			
+			break;
+		case TRAP_OUT:
+			putc((char)lc3->R[0], stdout);
+			fflush(stdout);
+			
+			break;
+		case TRAP_PUTS:
+			uint16_t* ch = lc3->ram + lc3->R[0];
+			while (*ch) {
+				putc((char)*ch, stdout);
+				++ch;
+			}
+			fflush(stdout);
+			
+			break;
+		case TRAP_IN:
+			printf("Enter a character: ");
+			char c = getchar();
+			putc(c, stdout);
+			fflush(stdout);
+			lc3->R[0] = (uint16_t)c;
+			lc3->param.DR = 0;
+			setcc(lc3);
+			
+			break;
+		case TRAP_PUTSP:
+			uint16_t *t = lc3->ram + lc3->R[0];
+			while (*t) {
+				char ch1 = (*t) & 0xFF;
+				char ch2 = (*t) >> 8;
+				putc(ch1, stdout);
+				if (ch2) putc(ch2, stdout);
+				++t;
+			}
+			fflush(stdout);
+
+			break;
+		case TRAP_HALT:
+			puts("HALT");
+			fflush(stdout);
+			lc3->state = QUIT;
+
+			break;
+		}
+
 		break;
 	case RES:
 	case RTI:
 	default:
-		// Invalid opcode
-		fprintf(stderr, "Invalid/unsuported opcode. (%i)\n", lc3->opcode);
+		// Handle Invalid/Unimplemented opcode
+		printf("Invalid/unsuported opcode. (0x%04X)\n", lc3->opcode);
 		break;
 	}
 
 }
+
+// ============= PLATFORM SPECIFICS =================
+// Input bufferin Windows
+// Needed to access the keyboard and behave nicely
+HANDLE hStdin = INVALID_HANDLE_VALUE;
+DWORD fdwMode, fdwOldMode;
+
+void disable_input_buffering() {
+    hStdin = GetStdHandle(STD_INPUT_HANDLE);
+    GetConsoleMode(hStdin, &fdwOldMode); /* save old mode */
+    fdwMode = fdwOldMode
+            ^ ENABLE_ECHO_INPUT  /* no input echo */
+            ^ ENABLE_LINE_INPUT; /* return when one or
+                                    more characters are available */
+    SetConsoleMode(hStdin, fdwMode); /* set new mode */
+    FlushConsoleInputBuffer(hStdin); /* clear buffer */
+}
+
+void restore_input_buffering() {
+    SetConsoleMode(hStdin, fdwOldMode);
+}
+
+uint16_t check_key() {
+    return WaitForSingleObject(hStdin, 1000) == WAIT_OBJECT_0 && _kbhit();
+}
+
+
+// Handle interrupt
+void handle_interrupt() {
+    restore_input_buffering();
+    printf("\n");
+    exit(-2);
+}
+
+
+
 
 int main(int argc, char *argv[]) {
 	// Default usage message
@@ -342,6 +462,12 @@ int main(int argc, char *argv[]) {
 		fprintf(stderr, "Usage %s <rom_file>\n", argv[0]);
 		exit(EXIT_FAILURE);
 	}
+
+	// ========== Setup =============
+	signal(SIGINT, handle_interrupt);
+	disable_input_buffering();
+
+
 
 	// Initialize LC-3 Machine
 	lc3_t lc3 = {0};
@@ -356,6 +482,9 @@ int main(int argc, char *argv[]) {
 		emulate_instruction(&lc3);
 
 	}
+
+	// ========== Shutdown ============
+	restore_input_buffering();
 
 	exit(EXIT_SUCCESS);
 }
